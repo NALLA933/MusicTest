@@ -19,11 +19,12 @@ logger = logging.getLogger("download")
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-AUTO_DELETE_SECONDS = 600  # 10 minutes
+AUTO_DELETE_SECONDS = 120
 COOKIE_DIR = "anony/cookies"
 
-# query cache: key -> {"url", "title", "duration"}
 search_cache: dict[str, dict] = {}
+
+_bg_tasks: set[asyncio.Task] = set()
 
 
 def get_cookie() -> str | None:
@@ -123,15 +124,67 @@ async def auto_delete(message: Message, delay: int = AUTO_DELETE_SECONDS) -> Non
     await asyncio.sleep(delay)
     try:
         await message.delete()
+    except Exception as e:
+        logger.warning("Auto-delete failed for message %s: %s", getattr(message, "id", "?"), e)
+
+
+def schedule_delete(message: Message, delay: int = AUTO_DELETE_SECONDS) -> None:
+    """Fire-and-forget delete that won't get silently garbage-collected."""
+    task = asyncio.create_task(auto_delete(message, delay))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+async def send_log(cq: CallbackQuery, entry: dict, mode: str, file_path: str | None) -> None:
+    """Send a download log to the configured LOGGER_ID group/channel."""
+    if not config.LOGGER_ID:
+        return
+
+    user = cq.from_user
+    user_mention = user.mention if user else "Unknown"
+    user_id = user.id if user else "N/A"
+    username = f"@{user.username}" if user and user.username else "—"
+
+    chat = cq.message.chat
+    chat_title = chat.title or chat.first_name or "Private Chat"
+    chat_id = chat.id
+
+    mode_label = "🎵 Audio (MP3)" if mode == "audio" else "🎬 Video (MP4)"
+
+    size_str = "—"
+    try:
+        if file_path and os.path.exists(file_path):
+            size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            size_str = f"{size_mb:.2f} MB"
     except Exception:
         pass
+
+    log_text = (
+        f"📥 <b>ɴᴇᴡ ᴅᴏᴡɴʟᴏᴀᴅ</b>\n\n"
+        f"ᴛɪᴛʟᴇ: <a href=\"{entry['url']}\">{entry['display_title']}</a>\n"
+        f"ᴛʏᴘᴇ: {mode_label}\n"
+        f"ᴅᴜʀᴀᴛɪᴏɴ: {entry['duration']}\n"
+        f"sɪᴢᴇ: {size_str}\n\n"
+        f"ʙʏ: {user_mention} (<code>{user_id}</code>)\n"
+        f"ᴜsᴇʀɴᴀᴍᴇ: {username}\n"
+        f"ᴄʜᴀᴛ: {chat_title} (<code>{chat_id}</code>)"
+    )
+
+    try:
+        await app.send_message(
+            config.LOGGER_ID,
+            log_text,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        logger.warning("Failed to send log to LOGGER_ID: %s", e)
 
 
 @app.on_message(filters.command(["download", "dl"], prefixes=["/", "!"]))
 async def download_search(_, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
-            "⚠️ <b>ᴜsᴀɢᴇ:</b> <code>/download song name ya link</code>"
+            "✨ <b>ᴜꜱᴀɢᴇ:</b> <code>/download [ꜱᴏɴɢ ɴᴀᴍᴇ/ʟɪɴᴋ]</code>"
         )
 
     query = message.text.split(None, 1)[1].strip()
@@ -232,14 +285,16 @@ async def download_callback(_, cq: CallbackQuery):
                 f"✅ <b>ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ sᴜᴄᴄᴇssꜰᴜʟʟʏ!</b>\n\n"
                 f"ᴛɪᴛʟᴇ: <a href=\"{entry['url']}\">{entry['display_title']}</a>\n"
                 f"\n"
-                f"<i>ᴛʜɪs ᴍᴇssᴀɢᴇ ᴡɪʟʟ ᴀᴜᴛᴏ-ᴅᴇʟᴇᴛᴇ ɪɴ 10 ᴍɪɴ.</i>",
+                f"<i>ᴛʜɪs ᴍᴇssᴀɢᴇ ᴡɪʟʟ ᴀᴜᴛᴏ-ᴅᴇʟᴇᴛᴇ ɪɴ {AUTO_DELETE_SECONDS // 60} ᴍɪɴ.</i>",
                 disable_web_page_preview=True,
             )
         except Exception:
             pass
 
-        asyncio.create_task(auto_delete(sent))
-        asyncio.create_task(auto_delete(cq.message))
+        schedule_delete(sent)
+        schedule_delete(cq.message)
+
+        await send_log(cq, entry, mode, file_path)
 
     except Exception as e:
         logger.exception("Download failed: %s", e)
