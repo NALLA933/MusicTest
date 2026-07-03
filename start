@@ -1,1 +1,1 @@
-python3 -m anony
+bash start
