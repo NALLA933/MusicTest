@@ -136,6 +136,14 @@ async def send_batch(
 async def tag_all(_, m: Message):
     chat_id = m.chat.id
 
+    # FIX: m.from_user can be None when the sender is an anonymous admin
+    # or the message comes from a linked channel. Guard before using .id
+    if not m.from_user:
+        return await m.reply_text(
+            "🚫 <b>ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴs ᴄᴀɴ'ᴛ ᴜsᴇ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ.</b>\n"
+            "<i>ᴘʟᴇᴀsᴇ ᴅɪsᴀʙʟᴇ 'sᴇɴᴅ ᴀs' ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.</i>"
+        )
+
     if not await is_admin(chat_id, m.from_user.id):
         return await m.reply_text("🚫 <b>ᴀᴅᴍɪɴs ᴏɴʟʏ.</b>")
 
@@ -243,6 +251,10 @@ async def stop_tag(_, m: Message):
     if chat_id not in active_tags:
         return await m.reply_text("ℹ️ <b>ɴᴏ ᴛᴀɢɢɪɴɢ ɪɴ ᴘʀᴏɢʀᴇss.</b>")
 
+    # FIX: same None guard here — stop_tag also reads m.from_user.id
+    if not m.from_user:
+        return await m.reply_text("🚫 <b>ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴs ᴄᴀɴ'ᴛ ᴜsᴇ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ.</b>")
+
     if not await is_admin(chat_id, m.from_user.id):
         return await m.reply_text("🚫 <b>ᴀᴅᴍɪɴs ᴏɴʟʏ.</b>")
 
@@ -256,6 +268,7 @@ async def cb_stop_tag(_, cq: CallbackQuery):
     if chat_id is None:
         return await cq.answer("ɪɴᴠᴀʟɪᴅ ᴅᴀᴛᴀ.", show_alert=True)
 
+    # cq.from_user is always present on callback queries, no guard needed here
     if not await is_admin(chat_id, cq.from_user.id):
         return await cq.answer("ᴀᴅᴍɪɴs ᴏɴʟʏ.", show_alert=True)
 
