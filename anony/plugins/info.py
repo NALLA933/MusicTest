@@ -28,7 +28,6 @@ def multi_prefix(commands: list[str]):
 
 
 async def get_group_link(chat: Chat) -> tuple[str, str | None]:
-    """Returns (group_type_label, link_or_none)."""
     if chat.username:
         return "ᴘᴜʙʟɪᴄ", f"https://t.me/{chat.username}"
 
@@ -76,12 +75,29 @@ def support_button() -> InlineKeyboardMarkup:
 @app.on_message(multi_prefix(INFO_COMMANDS) & filters.group & ~app.bl_users)
 async def user_info(_, m: Message):
     chat = m.chat
+    target_user = None
 
-    if m.reply_to_message and m.reply_to_message.from_user:
+    parts = m.text.split(maxsplit=1)
+    if len(parts) > 1:
+        query = parts[1].strip()
+        if query.startswith("@"):
+            query = query[1:]
+
+        try:
+            target_user = await app.get_users(query)
+        except Exception:
+            return await m.reply_text(
+                "⚠️ <b>ᴜsᴇʀ ɴᴏᴛ ꜰᴏᴜɴᴅ.</b>\n"
+                "<i>ᴄʜᴇᴄᴋ ᴛʜᴇ ᴜsᴇʀɴᴀᴍᴇ/ɪᴅ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.</i>"
+            )
+
+    elif m.reply_to_message and m.reply_to_message.from_user:
         target_user = m.reply_to_message.from_user
+
     elif m.from_user:
         target_user = m.from_user
-    else:
+
+    if not target_user:
         return await m.reply_text(
             "⚠️ <b>ᴄᴏᴜʟᴅ ɴᴏᴛ ꜰᴇᴛᴄʜ ᴜsᴇʀ ɪɴꜰᴏ.</b>\n"
             "<i>ᴛʜᴇ sᴇɴᴅᴇʀ ɪs ᴀɴᴏɴʏᴍᴏᴜs ᴏʀ ᴜsᴇʀ ᴅᴀᴛᴀ ɪs ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ.</i>"
