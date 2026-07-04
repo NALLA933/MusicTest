@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 import yt_dlp
+from py_yt import VideosSearch
 from pyrogram import filters
 from pyrogram.types import (
     Message,
@@ -21,6 +22,7 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 AUTO_DELETE_SECONDS = 120
 COOKIE_DIR = "anony/cookies"
+FRAGMENT_THREADS = 8
 
 search_cache: dict[str, dict] = {}
 
@@ -43,6 +45,14 @@ def base_opts() -> dict:
         "noplaylist": True,
         "geo_bypass": True,
         "nocheckcertificate": True,
+        "continuedl": True,
+        "concurrent_fragment_downloads": FRAGMENT_THREADS,
+        "retries": 10,
+        "fragment_retries": 10,
+        "extractor_retries": 3,
+        "file_access_retries": 3,
+        "socket_timeout": 20,
+        "http_chunk_size": 10 * 1024 * 1024,
     }
     cookie = get_cookie()
     if cookie:
@@ -64,6 +74,41 @@ def short_title(title: str, limit: int = 45) -> str:
     if len(title) <= limit:
         return title
     return title[:limit].rstrip() + "…"
+
+
+def duration_to_seconds(duration: str | None) -> int:
+    if not duration:
+        return 0
+
+    total = 0
+    for part in str(duration).split(":"):
+        if not part.isdigit():
+            return 0
+        total = total * 60 + int(part)
+    return total
+
+
+async def fast_search(query: str) -> dict | None:
+    if query.startswith(("http://", "https://")):
+        return await asyncio.to_thread(ydl_search, query)
+
+    try:
+        search = VideosSearch(query, limit=1, with_live=False)
+        results = await search.next()
+        items = results.get("result", []) if results else []
+        if not items:
+            return await asyncio.to_thread(ydl_search, query)
+
+        item = items[0]
+        return {
+            "id": item.get("id", ""),
+            "title": item.get("title") or "Unknown",
+            "duration": duration_to_seconds(item.get("duration")),
+            "webpage_url": item.get("link"),
+        }
+    except Exception as ex:
+        logger.debug("Fast search failed, falling back to yt-dlp: %s", ex)
+        return await asyncio.to_thread(ydl_search, query)
 
 
 def ydl_search(query: str) -> dict | None:
@@ -88,18 +133,16 @@ def ydl_download(url: str, audio_only: bool) -> str:
     if audio_only:
         opts = {
             **base_opts(),
-            "format": "bestaudio[ext=webm][acodec=opus]/bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm][acodec=opus]/bestaudio/best",
             "outtmpl": out_template,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
         }
     else:
         opts = {
             **base_opts(),
-            "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio)",
+            "format": (
+                "bestvideo[height<=?720][width<=?1280][ext=mp4]+bestaudio[ext=m4a]/"
+                "best[height<=?720][width<=?1280][ext=mp4]/best"
+            ),
             "outtmpl": out_template,
             "merge_output_format": "mp4",
         }
@@ -107,9 +150,11 @@ def ydl_download(url: str, audio_only: bool) -> str:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         path = ydl.prepare_filename(info)
-        if audio_only:
+        if not audio_only and not path.endswith(".mp4"):
             base, _ = os.path.splitext(path)
-            path = base + ".mp3"
+            merged_path = base + ".mp4"
+            if os.path.exists(merged_path):
+                path = merged_path
         return path
 
 
@@ -149,7 +194,7 @@ async def send_log(cq: CallbackQuery, entry: dict, mode: str, file_path: str | N
     chat_title = chat.title or chat.first_name or "Private Chat"
     chat_id = chat.id
 
-    mode_label = "🎵 Audio (MP3)" if mode == "audio" else "🎬 Video (MP4)"
+    mode_label = "🎵 Audio" if mode == "audio" else "🎬 Video (MP4)"
 
     size_str = "—"
     try:
@@ -191,7 +236,7 @@ async def download_search(_, message: Message):
     status = await message.reply_text("🔎 <b>sᴇᴀʀᴄʜɪɴɢ…</b>")
 
     try:
-        info = await asyncio.to_thread(ydl_search, query)
+        info = await fast_search(query)
     except Exception as e:
         logger.exception("Search failed: %s", e)
         return await status.edit_text("❌ <b>sᴇᴀʀᴄʜ ꜰᴀɪʟᴇᴅ. ᴛʀʏ ᴀɢᴀɪɴ.</b>")
@@ -200,7 +245,7 @@ async def download_search(_, message: Message):
         return await status.edit_text("❌ <b>ɴᴏ ʀᴇsᴜʟᴛs ꜰᴏᴜɴᴅ.</b>")
 
     video_id = info.get("id", "")
-    title    = info.get("title", "Unknown")
+    title    = info.get("title") or "Unknown"
     duration_secs = int(info.get("duration", 0) or 0)
     duration = format_duration(duration_secs)
     url      = info.get("webpage_url") or info.get("url") or f"https://youtu.be/{video_id}"
@@ -217,6 +262,7 @@ async def download_search(_, message: Message):
     key = video_id or str(abs(hash(url)))
     display_title = short_title(title)
     search_cache[key] = {
+        "id": video_id,
         "url": url,
         "title": title,
         "display_title": display_title,
@@ -267,17 +313,26 @@ async def download_callback(_, cq: CallbackQuery):
         caption = f"ᴛɪᴛʟᴇ: {entry['display_title']}"
 
         if audio_only:
-            sent = await app.send_audio(
-                cq.message.chat.id,
-                file_path,
-                title=entry["title"],
-                caption=caption,
-            )
+            try:
+                sent = await app.send_audio(
+                    cq.message.chat.id,
+                    file_path,
+                    title=entry["title"],
+                    caption=caption,
+                )
+            except Exception as ex:
+                logger.warning("send_audio failed, sending as document: %s", ex)
+                sent = await app.send_document(
+                    cq.message.chat.id,
+                    file_path,
+                    caption=caption,
+                )
         else:
             sent = await app.send_video(
                 cq.message.chat.id,
                 file_path,
                 caption=caption,
+                supports_streaming=True,
             )
 
         try:
