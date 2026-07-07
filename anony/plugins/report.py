@@ -1,18 +1,20 @@
 import time
-from pymongo import ReturnDocument
+import asyncio
+
+from pymongo import MongoClient, ReturnDocument
 
 from pyrogram import filters
 from pyrogram.types import Message
-from motor.motor_asyncio import AsyncIOMotorClient
 
 from anony import app
 from config import Config
 
 config = Config()
 
-mongo = AsyncIOMotorClient(config.MONGO_URL)
+mongo = MongoClient(config.MONGO_URL)
 db = mongo["AviaxMusic"]
 reports_col = db["reports"]
+counters_col = db["counters"]
 
 PREFIXES         = ["!", "/", ".", "@", ":"]
 REPORT_COMMANDS  = ["report", "comment"]
@@ -41,17 +43,22 @@ def extract_body(text: str, commands: list[str]) -> str | None:
     return None
 
 
-counters_col = db["counters"]
-
-
-async def generate_ticket_id() -> str:
-    result = await counters_col.find_one_and_update(
+def _generate_ticket_id_sync() -> str:
+    result = counters_col.find_one_and_update(
         {"_id": "ticket_id"},
         {"$inc": {"seq": 1}},
         upsert=True,
         return_document=ReturnDocument.AFTER,
     )
     return str(result["seq"])
+
+
+async def generate_ticket_id() -> str:
+    return await asyncio.to_thread(_generate_ticket_id_sync)
+
+
+def _save_report_sync(doc: dict) -> None:
+    reports_col.insert_one(doc)
 
 
 async def save_report(ticket_id: str, m: Message, reason: str) -> None:
@@ -76,7 +83,7 @@ async def save_report(ticket_id: str, m: Message, reason: str) -> None:
         doc["target_user_name"] = target.first_name or ""
         doc["target_username"] = target.username
 
-    await reports_col.insert_one(doc)
+    await asyncio.to_thread(_save_report_sync, doc)
 
 
 def build_log_text(ticket_id: str, m: Message, reason: str) -> str:
@@ -183,6 +190,14 @@ def is_sudo(user_id: int) -> bool:
     return user_id == config.OWNER_ID or user_id in getattr(app, "sudoers", [])
 
 
+def _find_report_sync(ticket_id: str) -> dict | None:
+    return reports_col.find_one({"ticket_id": ticket_id})
+
+
+def _delete_report_sync(ticket_id: str) -> None:
+    reports_col.delete_one({"ticket_id": ticket_id})
+
+
 @app.on_message(multi_prefix(RESOLVE_COMMANDS) & filters.private & ~app.bl_users)
 async def resolve_handler(_, m: Message):
     if not m.from_user or not is_sudo(m.from_user.id):
@@ -204,12 +219,9 @@ async def resolve_handler(_, m: Message):
 
     ticket_id, reply_msg = parts[0], parts[1]
 
-    report = await reports_col.find_one({"ticket_id": ticket_id})
+    report = await asyncio.to_thread(_find_report_sync, ticket_id)
     if not report:
         return await m.reply_text(f'❌ <b>ɴᴏ ʀᴇᴘᴏʀᴛ ꜰᴏᴜɴᴅ ꜰᴏʀ ᴛɪᴄᴋᴇᴛ:</b> "{ticket_id}"')
-
-    if report.get("status") == "resolved":
-        return await m.reply_text(f'ℹ️ <b>ᴛɪᴄᴋᴇᴛ "{ticket_id}" ɪs ᴀʟʀᴇᴀᴅʏ ʀᴇsᴏʟᴠᴇᴅ.</b>')
 
     chat_id = report["chat_id"]
     user_id = report["user_id"]
@@ -228,6 +240,6 @@ async def resolve_handler(_, m: Message):
     except Exception as e:
         return await m.reply_text(f"❌ <b>ꜰᴀɪʟᴇᴅ ᴛᴏ ɴᴏᴛɪꜰʏ ᴜsᴇʀ:</b> <code>{e}</code>")
 
-    await reports_col.delete_one({"ticket_id": ticket_id})
+    await asyncio.to_thread(_delete_report_sync, ticket_id)
 
     await m.reply_text(f'✅ <b>ᴛɪᴄᴋᴇᴛ "{ticket_id}" ᴍᴀʀᴋᴇᴅ ᴀs ʀᴇsᴏʟᴠᴇᴅ ᴀɴᴅ ᴜsᴇʀ ɴᴏᴛɪꜰɪᴇᴅ.</b>')
