@@ -13,7 +13,7 @@ from config import Config
 
 config = Config()
 
-PREFIXES     = ["!", "/", ".", "@", ":"]
+PREFIXES       = ["!", "/", ".", "@", ":"]
 GINFO_COMMANDS = ["ginfo", "gid", "groupinfo", "chatinfo"]
 
 
@@ -24,6 +24,10 @@ def multi_prefix(commands: list[str]):
         return bool(message.text) and any(message.text.startswith(t) for t in triggers)
 
     return filters.create(_check)
+
+
+def is_sudo(user_id: int) -> bool:
+    return user_id == config.OWNER_ID or user_id in getattr(app, "sudoers", [])
 
 
 def chat_type_label(chat: Chat) -> str:
@@ -85,6 +89,9 @@ def support_button() -> InlineKeyboardMarkup:
 
 @app.on_message(multi_prefix(GINFO_COMMANDS) & ~app.bl_users)
 async def group_info(_, m: Message):
+    if not m.from_user or not is_sudo(m.from_user.id):
+        return await m.reply_text("🚫 <b>sᴜᴅᴏ ᴜsᴇʀs ᴏɴʟʏ.</b>")
+
     parts = m.text.split(maxsplit=1)
 
     target_chat = None
