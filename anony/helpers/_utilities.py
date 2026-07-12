@@ -3,11 +3,9 @@
 # This file is part of AnonXMusic
 
 
-import asyncio
 import re
 
 from pyrogram import enums, types
-from pyrogram.errors import FloodWait
 
 from anony import app
 
@@ -106,44 +104,26 @@ class Utilities:
             title,
             duration,
         )
-        try:
-            await app.send_message(chat_id=app.logger, text=_text)
-        except FloodWait as ex:
-            # ek retry, uske baad skip - playback ko block nahi karna
-            try:
-                await asyncio.sleep(ex.value)
-                await app.send_message(chat_id=app.logger, text=_text)
-            except Exception:
-                pass
-        except Exception:
-            pass
+        await app.send_message(chat_id=app.logger, text=_text)
 
     async def send_log(self, m: types.Message, chat: bool = False) -> None:
-        try:
-            if chat:
-                user = m.from_user
-                return await app.send_message(
-                    chat_id=app.logger,
-                    text=m.lang["log_chat"].format(
-                        m.chat.id,
-                        m.chat.title,
-                        user.id if user else 0,
-                        user.mention if user else "Anonymous",
-                    ),
-                )
-
-            await app.send_message(
+        if chat:
+            user = m.from_user
+            return await app.send_message(
                 chat_id=app.logger,
-                text=m.lang["log_user"].format(
-                    m.from_user.id,
-                    f"@{m.from_user.username}",
-                    m.from_user.mention,
+                text=m.lang["log_chat"].format(
+                    m.chat.id,
+                    m.chat.title,
+                    user.id if user else 0,
+                    user.mention if user else "Anonymous",
                 ),
             )
-        except FloodWait as ex:
-            try:
-                await asyncio.sleep(ex.value)
-            except Exception:
-                pass
-        except Exception:
-            pass
+
+        await app.send_message(
+            chat_id=app.logger,
+            text=m.lang["log_user"].format(
+                m.from_user.id,
+                f"@{m.from_user.username}",
+                m.from_user.mention,
+            ),
+        )
