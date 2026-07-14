@@ -119,12 +119,23 @@ class YouTube:
             if not vid or vid in exclude:
                 continue
 
-            track = await self.search(entry.get("title") or vid, 0, video=video)
-            if track:
-                track.id = vid
-                track.url = f"{self.base}{vid}"
-                track.user = "Autoplay"
-                return track
+            duration_sec = entry.get("duration") or 0
+            minutes, seconds = divmod(int(duration_sec), 60)
+            duration = f"{minutes}:{seconds:02d}" if duration_sec else "0:00"
+
+            return Track(
+                id=vid,
+                channel_name=entry.get("channel") or entry.get("uploader") or "",
+                duration=duration,
+                duration_sec=duration_sec,
+                message_id=0,
+                title=(entry.get("title") or vid)[:25],
+                thumbnail=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                url=f"{self.base}{vid}",
+                view_count=str(entry.get("view_count") or ""),
+                video=video,
+                user="Autoplay",
+            )
         return None
 
     async def playlist(self, limit: int, user: str, url: str, video: bool) -> list[Track | None]:
@@ -199,4 +210,3 @@ class YouTube:
             return filename
 
         return await asyncio.to_thread(_download)
-
