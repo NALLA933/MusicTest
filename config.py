@@ -25,13 +25,9 @@ class Config:
         self.SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/Senpai_Updates")
         self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/+buzOK_SbwnE0NjM1")
 
-        self.API_URL = getenv("API_URL", "https://pvtz.nexgenbots.xyz")
-        self.VIDEO_API_URL = getenv("VIDEO_API_URL", "https://api.video.nexgenbots.xyz")
-        self.API_KEY = getenv("API_KEY", None) # Get this value from https://console.nexgenbots.xyz
-
         self.AUTO_LEAVE: bool = getenv("AUTO_LEAVE", "False").lower() == "true"
         self.AUTO_END: bool = getenv("AUTO_END", "False").lower() == "true"
-    
+
         self.THUMB_GEN: bool = getenv("THUMB_GEN", "True").lower() == "true"
         self.VIDEO_PLAY: bool = getenv("VIDEO_PLAY", "True").lower() == "true"
 
