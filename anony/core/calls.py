@@ -1,12 +1,8 @@
-# Copyright (c) 2025 AnonymousX1025
-# Licensed under the MIT License.
-# This file is part of AnonXMusic
-
-
 from ntgcalls import (ConnectionNotFound, TelegramServerError,
                       RTMPStreamingUnsupported, ConnectionError)
 from pyrogram.errors import (ChatSendMediaForbidden, ChatSendPhotosForbidden,
                              MessageIdInvalid)
+from pyrogram.raw import functions
 from pyrogram.types import InputMediaPhoto, Message
 from pytgcalls import PyTgCalls, exceptions, types
 from pytgcalls.pytgcalls_session import PyTgCallsSession
@@ -35,12 +31,12 @@ class TgCall(PyTgCalls):
         queue.clear(chat_id)
         await db.remove_call(chat_id)
         await db.set_loop(chat_id, 0)
+        await db.clear_autoplay_history(chat_id)
 
         try:
             await client.leave_call(chat_id, close=False)
         except Exception:
             pass
-
 
     async def play_media(
         self,
@@ -131,6 +127,29 @@ class TgCall(PyTgCalls):
             await self.stop(chat_id)
             await message.edit_text(_lang["error_rtmp"])
 
+    async def is_vc_empty(self, chat_id: int) -> bool:
+        client = await db.get_client(chat_id)
+        assistant_id = client.me.id
+
+        try:
+            peer = await client.resolve_peer(chat_id)
+            full = await client.invoke(functions.channels.GetFullChannel(channel=peer))
+            input_call = full.full_chat.call
+            if not input_call:
+                return True
+
+            result = await client.invoke(
+                functions.phone.GetGroupParticipants(
+                    call=input_call, ids=[], sources=[], offset="", limit=100
+                )
+            )
+            real_users = [
+                p for p in result.participants
+                if getattr(p.peer, "user_id", None) not in (assistant_id, None)
+            ]
+            return len(real_users) == 0
+        except Exception:
+            return False
 
     async def replay(self, chat_id: int) -> None:
         if not await db.get_call(chat_id):
@@ -142,12 +161,12 @@ class TgCall(PyTgCalls):
         media.message_id = msg.id
         await self.play_media(chat_id, msg, media)
 
-
     async def play_next(self, chat_id: int) -> None:
         if loop := await db.get_loop(chat_id):
             await db.set_loop(chat_id, loop - 1)
             return await self.replay(chat_id)
 
+        last = queue.get_current(chat_id)
         media = queue.get_next(chat_id)
         try:
             if media.message_id:
@@ -161,7 +180,21 @@ class TgCall(PyTgCalls):
             pass
 
         if not media:
-            return await self.stop(chat_id)
+            if last and await db.get_autoplay(chat_id):
+                if await self.is_vc_empty(chat_id):
+                    await db.clear_autoplay_history(chat_id)
+                else:
+                    history = await db.get_autoplay_history(chat_id)
+                    recommended = await yt.get_recommended(
+                        last.id, video=last.video, exclude=history
+                    )
+                    if recommended:
+                        queue.add(chat_id, recommended)
+                        await db.add_autoplay_history(chat_id, recommended.id)
+                        media = recommended
+
+            if not media:
+                return await self.stop(chat_id)
 
         _lang = await lang.get_lang(chat_id)
         msg = await app.send_message(chat_id=chat_id, text=_lang["play_next"])
@@ -176,11 +209,9 @@ class TgCall(PyTgCalls):
         media.message_id = msg.id
         await self.play_media(chat_id, msg, media)
 
-
     async def ping(self) -> float:
         pings = [client.ping for client in self.clients]
         return round(sum(pings) / len(pings), 2)
-
 
     async def decorators(self, client: PyTgCalls) -> None:
         @client.on_update()
@@ -196,7 +227,6 @@ class TgCall(PyTgCalls):
                 ]:
                     await self.stop(update.chat_id)
 
-
     async def boot(self) -> None:
         PyTgCallsSession.notice_displayed = True
         for ub in userbot.clients:
@@ -205,3 +235,4 @@ class TgCall(PyTgCalls):
             self.clients.append(client)
             await self.decorators(client)
         logger.info("PyTgCalls client(s) started.")
+

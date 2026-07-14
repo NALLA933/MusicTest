@@ -1,8 +1,3 @@
-# Copyright (c) 2025 AnonymousX1025
-# Licensed under the MIT License.
-# This file is part of AnonXMusic
-
-
 import os
 import re
 import yt_dlp
@@ -95,6 +90,43 @@ class YouTube:
             )
         return None
 
+    async def get_recommended(
+        self, video_id: str, video: bool = False, exclude: list[str] | None = None
+    ) -> Track | None:
+        exclude = set(exclude or []) | {video_id}
+
+        def _extract():
+            opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "playlist_items": "1-20",
+                "geo_bypass": True,
+                "cookiefile": self.get_cookies(),
+            }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(
+                        f"{self.base}{video_id}&list=RD{video_id}", download=False
+                    )
+                return info.get("entries", []) if info else []
+            except Exception:
+                return []
+
+        entries = await asyncio.to_thread(_extract)
+        for entry in entries:
+            vid = entry.get("id")
+            if not vid or vid in exclude:
+                continue
+
+            track = await self.search(entry.get("title") or vid, 0, video=video)
+            if track:
+                track.id = vid
+                track.url = f"{self.base}{vid}"
+                track.user = "Autoplay"
+                return track
+        return None
+
     async def playlist(self, limit: int, user: str, url: str, video: bool) -> list[Track | None]:
         tracks = []
         try:
@@ -167,3 +199,4 @@ class YouTube:
             return filename
 
         return await asyncio.to_thread(_download)
+

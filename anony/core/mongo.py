@@ -1,8 +1,3 @@
-# Copyright (c) 2025 AnonymousX1025
-# Licensed under the MIT License.
-# This file is part of AnonXMusic
-
-
 from random import randint
 from time import time
 
@@ -13,9 +8,6 @@ from anony import config, logger, userbot
 
 class MongoDB:
     def __init__(self):
-        """
-        Initialize the MongoDB connection.
-        """
         self.mongo = AsyncMongoClient(config.MONGO_URL, serverSelectionTimeoutMS=12500)
         self.db = self.mongo.Anon
 
@@ -35,6 +27,10 @@ class MongoDB:
         self.auth = {}
         self.authdb = self.db.auth
 
+        self.autoplay = []
+
+        self.autoplay_history = {}
+
         self.chats = []
         self.chatsdb = self.db.chats
 
@@ -45,11 +41,6 @@ class MongoDB:
         self.usersdb = self.db.users
 
     async def connect(self) -> None:
-        """Check if we can connect to the database.
-
-        Raises:
-            SystemExit: If the connection to the database fails.
-        """
         try:
             start = time()
             await self.mongo.admin.command("ping")
@@ -59,11 +50,9 @@ class MongoDB:
             raise SystemExit(f"Database connection failed: {type(e).__name__}") from e
 
     async def close(self) -> None:
-        """Close the connection to the database."""
         await self.mongo.close()
         logger.info("Database connection closed.")
 
-    # CACHE
     async def get_call(self, chat_id: int) -> bool:
         return chat_id in self.active_calls
 
@@ -91,7 +80,6 @@ class MongoDB:
     async def set_loop(self, chat_id: int, count: int) -> None:
         self.loop[chat_id] = count
 
-    # AUTH METHODS
     async def _get_auth(self, chat_id: int) -> set[int]:
         if chat_id not in self.auth:
             doc = await self.authdb.find_one({"_id": chat_id}) or {}
@@ -117,7 +105,6 @@ class MongoDB:
                 {"_id": chat_id}, {"$pull": {"user_ids": user_id}}
             )
 
-    # ASSISTANT METHODS
     async def set_assistant(self, chat_id: int) -> int:
         num = randint(1, len(userbot.clients))
         await self.assistantdb.update_one(
@@ -145,7 +132,28 @@ class MongoDB:
             self.assistant[chat_id]
         )
 
-    # BLACKLIST METHODS
+    async def get_autoplay(self, chat_id: int) -> bool:
+        return chat_id in self.autoplay
+
+    async def set_autoplay(self, chat_id: int, mode: bool) -> None:
+        if mode:
+            if chat_id not in self.autoplay:
+                self.autoplay.append(chat_id)
+        else:
+            if chat_id in self.autoplay:
+                self.autoplay.remove(chat_id)
+
+    async def add_autoplay_history(self, chat_id: int, video_id: str) -> None:
+        history = self.autoplay_history.setdefault(chat_id, [])
+        history.append(video_id)
+        del history[:-15]
+
+    async def get_autoplay_history(self, chat_id: int) -> list[str]:
+        return self.autoplay_history.get(chat_id, [])
+
+    async def clear_autoplay_history(self, chat_id: int) -> None:
+        self.autoplay_history.pop(chat_id, None)
+
     async def add_blacklist(self, chat_id: int) -> None:
         if str(chat_id).startswith("-"):
             self.blacklisted.append(chat_id)
@@ -177,7 +185,6 @@ class MongoDB:
         doc = await self.cache.find_one({"_id": "bl_users"})
         return doc.get("user_ids", []) if doc else []
 
-    # CHAT METHODS
     async def is_chat(self, chat_id: int) -> bool:
         return chat_id in self.chats
 
@@ -196,7 +203,6 @@ class MongoDB:
             self.chats.extend([chat["_id"] async for chat in self.chatsdb.find()])
         return self.chats
 
-    # COMMAND DELETE
     async def get_cmd_delete(self, chat_id: int) -> bool:
         if chat_id not in self.cmd_delete:
             doc = await self.chatsdb.find_one({"_id": chat_id})
@@ -215,7 +221,6 @@ class MongoDB:
             upsert=True,
         )
 
-    # LANGUAGE METHODS
     async def set_lang(self, chat_id: int, lang_code: str):
         await self.langdb.update_one(
             {"_id": chat_id},
@@ -230,7 +235,6 @@ class MongoDB:
             self.lang[chat_id] = doc["lang"] if doc else config.LANG_CODE
         return self.lang[chat_id]
 
-    # LOGGER METHODS
     async def is_logger(self) -> bool:
         return self.logger
 
@@ -248,7 +252,6 @@ class MongoDB:
             upsert=True,
         )
 
-    # PLAY MODE METHODS
     async def get_play_mode(self, chat_id: int) -> bool:
         if chat_id not in self.admin_play:
             doc = await self.chatsdb.find_one({"_id": chat_id})
@@ -267,7 +270,6 @@ class MongoDB:
             upsert=True,
         )
 
-    # SUDO METHODS
     async def add_sudo(self, user_id: int) -> None:
         await self.cache.update_one(
             {"_id": "sudoers"}, {"$addToSet": {"user_ids": user_id}}, upsert=True
@@ -282,7 +284,6 @@ class MongoDB:
         doc = await self.cache.find_one({"_id": "sudoers"})
         return doc.get("user_ids", []) if doc else []
 
-    # USER METHODS
     async def is_user(self, user_id: int) -> bool:
         return user_id in self.users
 
@@ -300,7 +301,6 @@ class MongoDB:
         if not self.users:
             self.users.extend([user["_id"] async for user in self.usersdb.find()])
         return self.users
-
 
     async def migrate_coll(self) -> None:
         logger.info("Migrating users and chats from old collections...")
@@ -356,3 +356,4 @@ class MongoDB:
         await self.get_blacklisted(True)
         await self.get_logger()
         logger.info("Database cache loaded.")
+
