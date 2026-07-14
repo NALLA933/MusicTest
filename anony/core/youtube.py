@@ -9,12 +9,11 @@ from pathlib import Path
 from py_yt import Playlist, VideosSearch
 
 from anony import config, logger
-from anony.helpers import NexGenApi, Track, utils
+from anony.helpers import Track, utils
 
 
 class YouTube:
     def __init__(self):
-        self.api = None
         self.base = "https://www.youtube.com/watch?v="
         self.cookies = []
         self.checked = False
@@ -30,12 +29,6 @@ class YouTube:
             r"(?!/(watch\?v=[A-Za-z0-9_-]{11}|shorts/[A-Za-z0-9_-]{11}"
             r"|playlist\?list=PL[A-Za-z0-9_-]+|[A-Za-z0-9_-]{11}))\S*"
         )
-        if config.API_URL and config.VIDEO_API_URL and config.API_KEY:
-            self.api = NexGenApi(
-                config.API_URL,
-                config.API_KEY,
-                config.VIDEO_API_URL
-            )
 
     def get_cookies(self):
         if not self.checked:
@@ -161,12 +154,6 @@ class YouTube:
         return tracks
 
     async def download(self, video_id: str, video: bool = False) -> str | None:
-        if self.api:
-            print(0)
-            if file_path := await self.api.download(video_id, video):
-                print(1)
-                return file_path
-
         url = self.base + video_id
         ext = "mp4" if video else "webm"
         filename = f"downloads/{video_id}.{ext}"
