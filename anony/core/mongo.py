@@ -28,6 +28,7 @@ class MongoDB:
         self.authdb = self.db.auth
 
         self.autoplay = []
+        self.autoplaydb = self.db.autoplay
 
         self.autoplay_history = {}
 
@@ -133,15 +134,23 @@ class MongoDB:
         )
 
     async def get_autoplay(self, chat_id: int) -> bool:
+        if chat_id not in self.autoplay:
+            doc = await self.autoplaydb.find_one({"_id": chat_id})
+            if doc:
+                self.autoplay.append(chat_id)
         return chat_id in self.autoplay
 
     async def set_autoplay(self, chat_id: int, mode: bool) -> None:
         if mode:
             if chat_id not in self.autoplay:
                 self.autoplay.append(chat_id)
+            await self.autoplaydb.update_one(
+                {"_id": chat_id}, {"$set": {"_id": chat_id}}, upsert=True
+            )
         else:
             if chat_id in self.autoplay:
                 self.autoplay.remove(chat_id)
+            await self.autoplaydb.delete_one({"_id": chat_id})
 
     async def add_autoplay_history(self, chat_id: int, video_id: str) -> None:
         history = self.autoplay_history.setdefault(chat_id, [])
@@ -356,4 +365,3 @@ class MongoDB:
         await self.get_blacklisted(True)
         await self.get_logger()
         logger.info("Database cache loaded.")
-
