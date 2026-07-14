@@ -1,8 +1,3 @@
-# Copyright (c) 2025 AnonymousX1025
-# Licensed under the MIT License.
-# This file is part of AnonXMusic
-
-
 from pyrogram import types
 
 from anony import app, config, lang
@@ -104,7 +99,13 @@ class Inline:
         )
 
     def settings_markup(
-        self, lang: dict, admin_only: bool, cmd_delete: bool, language: str, chat_id: int
+        self,
+        lang: dict,
+        admin_only: bool,
+        cmd_delete: bool,
+        language: str,
+        autoplay: bool,
+        chat_id: int,
     ) -> types.InlineKeyboardMarkup:
         return self.ikm(
             [
@@ -121,6 +122,13 @@ class Inline:
                         callback_data="settings",
                     ),
                     self.ikb(text=cmd_delete, callback_data="settings delete"),
+                ],
+                [
+                    self.ikb(
+                        text=lang.get("autoplay", "Autoplay") + " ➜",
+                        callback_data="settings",
+                    ),
+                    self.ikb(text=autoplay, callback_data="settings autoplay"),
                 ],
                 [
                     self.ikb(
