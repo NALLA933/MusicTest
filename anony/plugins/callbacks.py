@@ -1,8 +1,3 @@
-# Copyright (c) 2025 AnonymousX1025
-# Licensed under the MIT License.
-# This file is part of AnonXMusic
-
-
 import re
 
 from pyrogram import errors, filters, types
@@ -160,6 +155,7 @@ async def _settings_cb(_, query: types.CallbackQuery):
     _admin = await db.get_play_mode(chat_id)
     _delete = await db.get_cmd_delete(chat_id)
     _language = await db.get_lang(chat_id)
+    _autoplay = await db.get_autoplay(chat_id)
 
     if cmd[1] == "delete":
         _delete = not _delete
@@ -167,12 +163,16 @@ async def _settings_cb(_, query: types.CallbackQuery):
     elif cmd[1] == "play":
         await db.set_play_mode(chat_id, _admin)
         _admin = not _admin
+    elif cmd[1] == "autoplay":
+        _autoplay = not _autoplay
+        await db.set_autoplay(chat_id, _autoplay)
     await query.edit_message_reply_markup(
         reply_markup=buttons.settings_markup(
             query.lang,
             _admin,
             _delete,
             _language,
+            _autoplay,
             chat_id,
         )
     )
